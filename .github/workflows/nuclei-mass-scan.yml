@@ -158,17 +158,29 @@ jobs:
         with:
           go-version: '1.21'
 
+      - name: Cache Nuclei binary
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/bin/nuclei
+          key: nuclei-${{ env.NUCLEI_VERSION }}-${{ runner.os }}
+
       - name: Install Nuclei
         run: |
-          go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@${{ env.NUCLEI_VERSION }}
+          if [ ! -f ~/go/bin/nuclei ]; then
+            echo "📥 Installing Nuclei..."
+            go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@${{ env.NUCLEI_VERSION }}
+          else
+            echo "✅ Nuclei binary restored from cache"
+          fi
           nuclei -version
 
       - name: Update Nuclei templates
         run: |
-          # Update templates and show where they're stored
+          # Always download latest templates
           nuclei -update-templates
           
-          # Check both possible locations
+          # Check template location
           echo "🔍 Checking template locations..."
           for template_dir in ~/nuclei-templates ; do
             if [ -d "$template_dir" ]; then
