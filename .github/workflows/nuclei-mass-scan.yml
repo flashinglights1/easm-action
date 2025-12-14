@@ -13,6 +13,11 @@ on:
         required: true
         default: '10'
         type: string
+      batch_size:
+        description: 'Subdomains per batch'
+        required: false
+        default: '500'
+        type: string
       scan_profile:
         description: 'Scan profile (quick/full/critical)'
         required: true
@@ -27,7 +32,7 @@ on:
     - cron: '0 2 * * *'
 
 env:
-  BATCH_SIZE: 500  # Reduced batch size for faster completion
+  BATCH_SIZE: ${{ github.event.inputs.batch_size || '500' }}  # Use input or default to 500
   MAX_PARALLEL_JOBS: 15  # Conservative limit to avoid GitHub rate limits
   NUCLEI_VERSION: "v3.4.10"
   RESULTS_BRANCH: "scan-results"  # Dedicated branch for storing results

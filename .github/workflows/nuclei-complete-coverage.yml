@@ -165,6 +165,7 @@ jobs:
             const batchStart = ${{ steps.calc-range.outputs.group_batch_start }};
             const batchEnd = ${{ steps.calc-range.outputs.group_batch_end }};
             const scanProfile = '${{ github.event.inputs.scan_profile || 'quick' }}';
+            const batchSize = '${{ needs.calculate-total-coverage.outputs.batch_size }}';
             const delayMinutes = parseInt('${{ github.event.inputs.delay_between_batches || '2' }}');
             
             console.log(`🎯 Group ${groupNum}: Processing batches ${batchStart} to ${batchEnd}`);
@@ -185,6 +186,7 @@ jobs:
                   inputs: {
                     batch_start: batchNum.toString(),
                     batch_end: batchNum.toString(),
+                    batch_size: batchSize,
                     scan_profile: scanProfile
                   }
                 });
