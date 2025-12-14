@@ -1,0 +1,170 @@
+name: Nuclei Mass Scale Wrapper (Optimized)
+
+on:
+  workflow_dispatch:
+    inputs:
+      batch_size:
+        description: 'Subdomains per batch (e.g., 500)'
+        required: true
+        default: '500'
+        type: string
+      max_parallel_workflows:
+        description: 'Max parallel workflows to launch (1-50)'
+        required: false
+        default: '20'
+        type: string
+      scan_profile:
+        description: 'Scan profile for all workflows'
+        required: true
+        default: 'quick'
+        type: choice
+        options: ['ultra-fast', 'quick', 'critical', 'full']
+
+env:
+  RESULTS_BRANCH: "scan-results"
+  GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+
+jobs:
+  calculate-mass-scale:
+    runs-on: ubuntu-latest
+    outputs:
+      total_subdomains: ${{ steps.calc.outputs.total_subdomains }}
+      total_batches: ${{ steps.calc.outputs.total_batches }}
+      total_workflows: ${{ steps.calc.outputs.total_workflows }}
+      batches_per_workflow: ${{ steps.calc.outputs.batches_per_workflow }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup GPG
+        run: |
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+          gpg --list-secret-keys --keyid-format LONG
+
+      - name: Calculate mass scale configuration
+        id: calc
+        run: |
+          # Decrypt and count subdomains
+          gpg --batch --yes --trust-model always \
+            --decrypt "subdomains/all-subdomains.txt.gpg" > temp_subdomains.txt
+          
+          TOTAL_SUBDOMAINS=$(wc -l < temp_subdomains.txt)
+          BATCH_SIZE=${{ github.event.inputs.batch_size }}
+          MAX_PARALLEL_WORKFLOWS=${{ github.event.inputs.max_parallel_workflows || '20' }}
+          
+          # Calculate total batches needed
+          TOTAL_BATCHES=$(( (TOTAL_SUBDOMAINS + BATCH_SIZE - 1) / BATCH_SIZE ))
+          
+          # Each nuclei-mass-scan workflow can handle 19 parallel jobs
+          # Each job processes 1 batch
+          # So each workflow can process 19 batches
+          BATCHES_PER_WORKFLOW=19
+          
+          # Calculate total workflows needed
+          TOTAL_WORKFLOWS=$(( (TOTAL_BATCHES + BATCHES_PER_WORKFLOW - 1) / BATCHES_PER_WORKFLOW ))
+          
+          echo "📊 Mass Scale Configuration:"
+          echo "  Total subdomains: $TOTAL_SUBDOMAINS"
+          echo "  Batch size: $BATCH_SIZE"
+          echo "  Total batches: $TOTAL_BATCHES"
+          echo "  Batches per workflow: $BATCHES_PER_WORKFLOW"
+          echo "  Total workflows needed: $TOTAL_WORKFLOWS"
+          echo "  Max parallel workflows: $MAX_PARALLEL_WORKFLOWS"
+          
+          echo "total_subdomains=$TOTAL_SUBDOMAINS" >> $GITHUB_OUTPUT
+          echo "total_batches=$TOTAL_BATCHES" >> $GITHUB_OUTPUT
+          echo "total_workflows=$TOTAL_WORKFLOWS" >> $GITHUB_OUTPUT
+          echo "batches_per_workflow=$BATCHES_PER_WORKFLOW" >> $GITHUB_OUTPUT
+          
+          rm -f temp_subdomains.txt
+          
+          echo "✅ Mass scale calculation complete!"
+          echo "🚀 Will launch $TOTAL_WORKFLOWS workflows sequentially"
+
+  launch-all-workflows:
+    needs: calculate-mass-scale
+    runs-on: ubuntu-latest
+    steps:
+      - name: Launch all nuclei-mass-scan workflows sequentially
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const totalWorkflows = ${{ needs.calculate-mass-scale.outputs.total_workflows }};
+            const batchesPerWorkflow = ${{ needs.calculate-mass-scale.outputs.batches_per_workflow }};
+            const totalBatches = ${{ needs.calculate-mass-scale.outputs.total_batches }};
+            const scanProfile = '${{ github.event.inputs.scan_profile || 'quick' }}';
+            const batchSize = '${{ github.event.inputs.batch_size }}';
+            const maxParallel = parseInt('${{ github.event.inputs.max_parallel_workflows || '20' }}');
+            
+            console.log(`🚀 Launching ${totalWorkflows} workflows sequentially`);
+            console.log(`📊 Each workflow: ${batchesPerWorkflow} batches × ${batchSize} subdomains`);
+            console.log(`⚡ Scan profile: ${scanProfile}`);
+            console.log(`🔄 Max parallel workflows: ${maxParallel}`);
+            
+            let successCount = 0;
+            let errorCount = 0;
+            const launchedWorkflows = [];
+            
+            // Launch workflows in batches to respect parallel limits
+            for (let workflowNum = 1; workflowNum <= totalWorkflows; workflowNum++) {
+              try {
+                // Calculate batch range for this workflow
+                const batchStart = (workflowNum - 1) * batchesPerWorkflow + 1;
+                let batchEnd = workflowNum * batchesPerWorkflow;
+                
+                // Don't exceed total batches
+                if (batchEnd > totalBatches) {
+                  batchEnd = totalBatches;
+                }
+                
+                console.log(`🎯 Workflow ${workflowNum}: Batches ${batchStart}-${batchEnd}`);
+                
+                const response = await github.rest.actions.createWorkflowDispatch({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  workflow_id: 'nuclei-mass-scan.yml',
+                  ref: 'main',
+                  inputs: {
+                    batch_start: batchStart.toString(),
+                    batch_end: batchEnd.toString(),
+                    scan_profile: scanProfile
+                  }
+                });
+                
+                successCount++;
+                launchedWorkflows.push({
+                  workflowNum,
+                  batchStart,
+                  batchEnd,
+                  batchCount: batchEnd - batchStart + 1
+                });
+                
+                console.log(`✅ Workflow ${workflowNum} launched successfully`);
+                
+                // If we've launched maxParallel workflows, wait a bit before continuing
+                if (workflowNum % maxParallel === 0 && workflowNum < totalWorkflows) {
+                  console.log(`⏱️ Launched ${maxParallel} workflows, waiting 30 seconds before next batch...`);
+                  await new Promise(resolve => setTimeout(resolve, 30000));
+                }
+                
+              } catch (error) {
+                errorCount++;
+                console.error(`❌ Failed to launch workflow ${workflowNum}:`, error.message);
+                // Continue with next workflow even if one fails
+              }
+            }
+            
+            console.log(`📊 Launch Summary:`);
+            console.log(`✅ Successful launches: ${successCount}`);
+            console.log(`❌ Failed launches: ${errorCount}`);
+            console.log(`📈 Total workflows: ${totalWorkflows}`);
+            
+            if (errorCount > 0) {
+              console.log(`⚠️ Some workflows failed to launch. Check logs above for details.`);
+            }
+            
+            // Set outputs for monitoring
+            core.setOutput('success_count', successCount);
+            core.setOutput('error_count', errorCount);
+            core.setOutput('total_workflows', totalWorkflows);

@@ -1,0 +1,68 @@
+# name: Nuclei Mass Scale Dashboard
+
+# on:
+#   workflow_dispatch:
+#   schedule:
+#     # Run every 5 minutes to provide real-time monitoring
+#     - cron: '*/5 * * * *'
+
+# jobs:
+#   dashboard:
+#     runs-on: ubuntu-latest
+#     timeout-minutes: 10
+#     steps:
+#       - name: Generate Dashboard
+#         run: |
+#           echo "# 🚀 Nuclei Mass Scale Dashboard" >> $GITHUB_STEP_SUMMARY
+#           echo "" >> $GITHUB_STEP_SUMMARY
+#           echo "**Last updated:** $(date)" >> $GITHUB_STEP_SUMMARY
+#           echo "" >> $GITHUB_STEP_SUMMARY
+          
+#           # Get workflow counts
+#           RUNNING=$(gh run list --repo ${{ github.repository }} --workflow=nuclei-mass-scan.yml --status=in_progress --json databaseId --jq 'length' 2>/dev/null || echo "0")
+#           QUEUED=$(gh run list --repo ${{ github.repository }} --workflow=nuclei-mass-scan.yml --status=queued --json databaseId --jq 'length' 2>/dev/null || echo "0")
+#           COMPLETED=$(gh run list --repo ${{ github.repository }} --workflow=nuclei-mass-scan.yml --status=completed --json databaseId --jq 'length' 2>/dev/null || echo "0")
+#           FAILED=$(gh run list --repo ${{ github.repository }} --workflow=nuclei-mass-scan.yml --status=failure --json databaseId --jq 'length' 2>/dev/null || echo "0")
+          
+#           TOTAL=$((RUNNING + QUEUED + COMPLETED + FAILED))
+          
+#           echo "## 📊 Quick Status" >> $GITHUB_STEP_SUMMARY
+#           echo "| Status | Count |" >> $GITHUB_STEP_SUMMARY
+#           echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+#           echo "| 🟡 Running | $RUNNING |" >> $GITHUB_STEP_SUMMARY
+#           echo "| ⏳ Queued | $QUEUED |" >> $GITHUB_STEP_SUMMARY
+#           echo "| ✅ Completed | $COMPLETED |" >> $GITHUB_STEP_SUMMARY
+#           echo "| ❌ Failed | $FAILED |" >> $GITHUB_STEP_SUMMARY
+#           echo "| **Total** | **$TOTAL** |" >> $GITHUB_STEP_SUMMARY
+#           echo "" >> $GITHUB_STEP_SUMMARY
+          
+#           if [ $TOTAL -gt 0 ]; then
+#             PROGRESS=$((COMPLETED * 100 / TOTAL))
+#             echo "## 📈 Progress: $PROGRESS%" >> $GITHUB_STEP_SUMMARY
+#             echo "" >> $GITHUB_STEP_SUMMARY
+            
+#             # Simple progress bar
+#             BAR_LENGTH=20
+#             FILLED=$((PROGRESS * BAR_LENGTH / 100))
+#             BAR=""
+#             for i in $(seq 1 $BAR_LENGTH); do
+#               if [ $i -le $FILLED ]; then
+#                 BAR="${BAR}█"
+#               else
+#                 BAR="${BAR}░"
+#               fi
+#             done
+#             echo "Progress: [$BAR] $PROGRESS%" >> $GITHUB_STEP_SUMMARY
+#             echo "" >> $GITHUB_STEP_SUMMARY
+#           fi
+          
+#           echo "## 🔗 Quick Actions" >> $GITHUB_STEP_SUMMARY
+#           echo "- [View All Workflows](https://github.com/${{ github.repository }}/actions/workflows/nuclei-mass-scan.yml)" >> $GITHUB_STEP_SUMMARY
+#           echo "- [Detailed Monitor](https://github.com/${{ github.repository }}/actions/workflows/nuclei-mass-monitor.yml)" >> $GITHUB_STEP_SUMMARY
+#           echo "- [Results Branch](https://github.com/${{ github.repository }}/tree/scan-results)" >> $GITHUB_STEP_SUMMARY
+#           echo "" >> $GITHUB_STEP_SUMMARY
+          
+#           echo "## ⚡ Recent Activity" >> $GITHUB_STEP_SUMMARY
+#           echo "Last 5 workflow runs:" >> $GITHUB_STEP_SUMMARY
+#           gh run list --repo ${{ github.repository }} --workflow=nuclei-mass-scan.yml --limit 5 --json number,status,createdAt,displayTitle --jq '.[] | "- **Run #\(.number)**: \(.status) - \(.displayTitle) (\(.createdAt))"' >> $GITHUB_STEP_SUMMARY
+

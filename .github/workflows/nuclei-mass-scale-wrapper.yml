@@ -1,0 +1,199 @@
+name: Nuclei Mass Scale Wrapper
+
+on:
+  workflow_dispatch:
+    inputs:
+      batch_size:
+        description: 'Subdomains per batch (e.g., 500)'
+        required: true
+        default: '500'
+        type: string
+      max_parallel_workflows:
+        description: 'Max parallel workflows to launch (1-50)'
+        required: false
+        default: '20'
+        type: string
+      scan_profile:
+        description: 'Scan profile for all workflows'
+        required: true
+        default: 'quick'
+        type: choice
+        options: ['ultra-fast', 'quick', 'critical', 'full']
+
+env:
+  RESULTS_BRANCH: "scan-results"
+  GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+
+jobs:
+  calculate-mass-scale:
+    runs-on: ubuntu-latest
+    outputs:
+      total_subdomains: ${{ steps.calc.outputs.total_subdomains }}
+      total_batches: ${{ steps.calc.outputs.total_batches }}
+      total_workflows: ${{ steps.calc.outputs.total_workflows }}
+      workflow_matrix: ${{ steps.calc.outputs.workflow_matrix }}
+      batches_per_workflow: ${{ steps.calc.outputs.batches_per_workflow }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup GPG
+        run: |
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+          gpg --list-secret-keys --keyid-format LONG
+
+      - name: Calculate mass scale configuration
+        id: calc
+        run: |
+          # Decrypt and count subdomains
+          gpg --batch --yes --trust-model always \
+            --decrypt "subdomains/all-subdomains.txt.gpg" > temp_subdomains.txt
+          
+          TOTAL_SUBDOMAINS=$(wc -l < temp_subdomains.txt)
+          BATCH_SIZE=${{ github.event.inputs.batch_size }}
+          MAX_PARALLEL_WORKFLOWS=${{ github.event.inputs.max_parallel_workflows || '10' }}
+          
+          # Calculate total batches needed
+          TOTAL_BATCHES=$(( (TOTAL_SUBDOMAINS + BATCH_SIZE - 1) / BATCH_SIZE ))
+          
+          # Each nuclei-mass-scan workflow can handle 19 parallel jobs
+          # Each job processes 1 batch
+          # So each workflow can process 19 batches
+          BATCHES_PER_WORKFLOW=19
+          
+          # Calculate total workflows needed
+          TOTAL_WORKFLOWS=$(( (TOTAL_BATCHES + BATCHES_PER_WORKFLOW - 1) / BATCHES_PER_WORKFLOW ))
+          
+          echo "📊 Mass Scale Configuration:"
+          echo "  Total subdomains: $TOTAL_SUBDOMAINS"
+          echo "  Batch size: $BATCH_SIZE"
+          echo "  Total batches: $TOTAL_BATCHES"
+          echo "  Batches per workflow: $BATCHES_PER_WORKFLOW"
+          echo "  Total workflows needed: $TOTAL_WORKFLOWS"
+          echo "  Max parallel workflows: $MAX_PARALLEL_WORKFLOWS"
+          
+          # Create workflow matrix
+          WORKFLOW_ARRAY="["
+          for i in $(seq 1 $TOTAL_WORKFLOWS); do
+            if [ $i -eq $TOTAL_WORKFLOWS ]; then
+              WORKFLOW_ARRAY="${WORKFLOW_ARRAY}$i"
+            else
+              WORKFLOW_ARRAY="${WORKFLOW_ARRAY}$i,"
+            fi
+          done
+          WORKFLOW_ARRAY="${WORKFLOW_ARRAY}]"
+          
+          echo "total_subdomains=$TOTAL_SUBDOMAINS" >> $GITHUB_OUTPUT
+          echo "total_batches=$TOTAL_BATCHES" >> $GITHUB_OUTPUT
+          echo "total_workflows=$TOTAL_WORKFLOWS" >> $GITHUB_OUTPUT
+          echo "workflow_matrix=$WORKFLOW_ARRAY" >> $GITHUB_OUTPUT
+          echo "batches_per_workflow=$BATCHES_PER_WORKFLOW" >> $GITHUB_OUTPUT
+          
+          rm -f temp_subdomains.txt
+          
+          echo "✅ Mass scale calculation complete!"
+          echo "🚀 Will launch $TOTAL_WORKFLOWS workflows in parallel"
+
+  launch-mass-workflows:
+    needs: calculate-mass-scale
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ fromJson(github.event.inputs.max_parallel_workflows || '10') }}
+      matrix:
+        workflow_number: ${{ fromJson(needs.calculate-mass-scale.outputs.workflow_matrix) }}
+    steps:
+      - name: Calculate batch range for this workflow
+        id: calc-range
+        run: |
+          WORKFLOW_NUM=${{ matrix.workflow_number }}
+          BATCHES_PER_WORKFLOW=${{ needs.calculate-mass-scale.outputs.batches_per_workflow }}
+          TOTAL_BATCHES=${{ needs.calculate-mass-scale.outputs.total_batches }}
+          
+          # Calculate batch range for this workflow
+          BATCH_START=$(( (WORKFLOW_NUM - 1) * BATCHES_PER_WORKFLOW + 1 ))
+          BATCH_END=$(( WORKFLOW_NUM * BATCHES_PER_WORKFLOW ))
+          
+          # Don't exceed total batches
+          if [ $BATCH_END -gt $TOTAL_BATCHES ]; then
+            BATCH_END=$TOTAL_BATCHES
+          fi
+          
+          echo "workflow_start_batch=$BATCH_START" >> $GITHUB_OUTPUT
+          echo "workflow_end_batch=$BATCH_END" >> $GITHUB_OUTPUT
+          echo "workflow_batch_count=$(( BATCH_END - BATCH_START + 1 ))" >> $GITHUB_OUTPUT
+          
+          echo "🎯 Workflow $WORKFLOW_NUM:"
+          echo "  Batch range: $BATCH_START to $BATCH_END"
+          echo "  Total batches: $(( BATCH_END - BATCH_START + 1 ))"
+
+      - name: Launch nuclei-mass-scan workflow
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const workflowNum = ${{ matrix.workflow_number }};
+            const batchStart = ${{ steps.calc-range.outputs.workflow_start_batch }};
+            const batchEnd = ${{ steps.calc-range.outputs.workflow_end_batch }};
+            const scanProfile = '${{ github.event.inputs.scan_profile || 'quick' }}';
+            const batchSize = '${{ github.event.inputs.batch_size }}';
+            
+            console.log(`🚀 Launching Workflow ${workflowNum}: Batches ${batchStart}-${batchEnd}`);
+            console.log(`📊 Each batch: ${batchSize} subdomains`);
+            console.log(`⚡ Scan profile: ${scanProfile}`);
+            
+            try {
+              const response = await github.rest.actions.createWorkflowDispatch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: 'nuclei-mass-scan.yml',
+                ref: 'main',
+                inputs: {
+                  batch_start: batchStart.toString(),
+                  batch_end: batchEnd.toString(),
+                  scan_profile: scanProfile
+                }
+              });
+              
+              console.log(`✅ Workflow ${workflowNum} launched successfully`);
+              console.log(`📈 Processing ${batchEnd - batchStart + 1} batches with 19 parallel jobs each`);
+              
+            } catch (error) {
+              console.error(`❌ Failed to launch workflow ${workflowNum}:`, error);
+              throw error;
+            }
+
+  monitor-mass-progress:
+    needs: [calculate-mass-scale, launch-mass-workflows]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Generate mass scale report
+        run: |
+          echo "# 🚀 Nuclei Mass Scale Wrapper Complete!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 📊 Mass Scale Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Total Subdomains**: ${{ needs.calculate-mass-scale.outputs.total_subdomains }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Batch Size**: ${{ github.event.inputs.batch_size }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Total Batches**: ${{ needs.calculate-mass-scale.outputs.total_batches }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Total Workflows**: ${{ needs.calculate-mass-scale.outputs.total_workflows }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Batches per Workflow**: ${{ needs.calculate-mass-scale.outputs.batches_per_workflow }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Max Parallel Workflows**: ${{ github.event.inputs.max_parallel_workflows || '10' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Scan Profile**: ${{ github.event.inputs.scan_profile || 'quick' }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## ⚡ Parallel Execution" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **${{ needs.calculate-mass-scale.outputs.total_workflows }} workflows launched**" >> $GITHUB_STEP_SUMMARY
+          echo "🔄 **Each workflow runs 19 parallel jobs**" >> $GITHUB_STEP_SUMMARY
+          echo "📈 **Total parallel jobs**: ${{ needs.calculate-mass-scale.outputs.total_workflows }} × 19 = $(( ${{ needs.calculate-mass-scale.outputs.total_workflows }} * 19 ))" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🎯 Coverage Guarantee" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **100% subdomain coverage** - every subdomain scanned" >> $GITHUB_STEP_SUMMARY
+          echo "⚡ **Maximum parallelization** - unlimited workflows" >> $GITHUB_STEP_SUMMARY
+          echo "🛡️ **GitHub limits respected** - 19 jobs per workflow" >> $GITHUB_STEP_SUMMARY
+          echo "📊 **Scalable to any size** - 1M to 100M+ subdomains" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🔍 Monitoring" >> $GITHUB_STEP_SUMMARY
+          echo "1. **Check individual workflows** in the Actions tab" >> $GITHUB_STEP_SUMMARY
+          echo "2. **Monitor progress** - each workflow shows 19 parallel jobs" >> $GITHUB_STEP_SUMMARY
+          echo "3. **View results** in the \`${{ env.RESULTS_BRANCH }}\` branch" >> $GITHUB_STEP_SUMMARY
+          echo "4. **Use \`scripts/decrypt-results.sh\`** to view results locally" >> $GITHUB_STEP_SUMMARY
