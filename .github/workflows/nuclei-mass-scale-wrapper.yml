@@ -18,7 +18,7 @@ on:
         required: true
         default: 'quick'
         type: choice
-        options: ['ultra-fast', 'quick', 'critical', 'full']
+        options: ['quick', 'critical', 'full', 'custom']
 
 env:
   RESULTS_BRANCH: "scan-results"

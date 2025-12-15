@@ -19,7 +19,7 @@ on:
         default: '500'
         type: string
       scan_profile:
-        description: 'Scan profile (quick/full/critical)'
+        description: 'Scan profile (quick/full/critical/custom)'
         required: true
         default: 'quick'
         type: choice
@@ -27,6 +27,7 @@ on:
         - quick
         - full
         - critical
+        - custom
   schedule:
     # Run daily at 2 AM UTC
     - cron: '0 2 * * *'
@@ -248,6 +249,20 @@ jobs:
               SEVERITY="-severity critical"
               RATE_LIMIT="-rl 550"
               TIMEOUT="-timeout 5"
+              ;;
+            "custom")
+              # Use custom templates from repository
+              CUSTOM_TEMPLATE_DIR="${GITHUB_WORKSPACE}/nuclei-templates"
+              if [ ! -d "$CUSTOM_TEMPLATE_DIR" ]; then
+                echo "❌ Custom template directory not found at $CUSTOM_TEMPLATE_DIR"
+                echo "Please create 'nuclei-templates' folder in repository root"
+                exit 1
+              fi
+              TEMPLATES="-t $CUSTOM_TEMPLATE_DIR"
+              SEVERITY="-severity critical,high,medium,low"
+              RATE_LIMIT="-rl 550"
+              TIMEOUT="-timeout 10"
+              echo "✅ Using custom templates from: $CUSTOM_TEMPLATE_DIR"
               ;;
             "full"|*)
               TEMPLATES="-t $TEMPLATE_DIR/"  # All templates

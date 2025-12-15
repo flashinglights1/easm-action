@@ -9,10 +9,10 @@ on:
         default: 'quick'
         type: choice
         options:
-        - 'ultra-fast'
         - 'quick'
         - 'critical'
         - 'full'
+        - 'custom'
       max_parallel_jobs:
         description: 'Maximum parallel scanning jobs'
         required: false
