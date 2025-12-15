@@ -367,209 +367,212 @@ jobs:
             echo "results_txt=${OUTPUT_TXT}" >> $GITHUB_ENV
           fi
 
-      - name: Generate scan summary
-        run: |
-          BATCH_NUM=${{ matrix.batch }}
-          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-          SUMMARY_FILE="scan_summary_batch_${BATCH_NUM}_${TIMESTAMP}.json"
-          
-          # Count results by severity
-          if [ -f "${{ env.results_json }}" ]; then
-            CRITICAL=$(jq -r 'select(.info.severity == "critical") | .info.severity' ${{ env.results_json }} 2>/dev/null | wc -l || echo "0")
-            HIGH=$(jq -r 'select(.info.severity == "high") | .info.severity' ${{ env.results_json }} 2>/dev/null | wc -l || echo "0")
-            MEDIUM=$(jq -r 'select(.info.severity == "medium") | .info.severity' ${{ env.results_json }} 2>/dev/null | wc -l || echo "0")
-            LOW=$(jq -r 'select(.info.severity == "low") | .info.severity' ${{ env.results_json }} 2>/dev/null | wc -l || echo "0")
-            INFO=$(jq -r 'select(.info.severity == "info") | .info.severity' ${{ env.results_json }} 2>/dev/null | wc -l || echo "0")
-            TOTAL=$(wc -l < ${{ env.results_json }} 2>/dev/null || echo "0")
-          else
-            CRITICAL=0; HIGH=0; MEDIUM=0; LOW=0; INFO=0; TOTAL=0
-          fi
-          
-          # Create summary JSON
-          cat > "${SUMMARY_FILE}" << EOF
-          {
-            "batch_number": ${BATCH_NUM},
-            "scan_timestamp": "${TIMESTAMP}",
-            "subdomains_scanned": ${{ steps.prepare-batch.outputs.subdomain_count }},
-            "scan_profile": "${{ github.event.inputs.scan_profile || 'full' }}",
-            "results_summary": {
-              "total_findings": ${TOTAL},
-              "critical": ${CRITICAL},
-              "high": ${HIGH},
-              "medium": ${MEDIUM},
-              "low": ${LOW},
-              "info": ${INFO}
-            },
-            "scan_metadata": {
-              "nuclei_version": "${{ env.NUCLEI_VERSION }}",
-              "workflow_run_id": "${{ github.run_id }}",
-              "workflow_run_number": "${{ github.run_number }}"
-            }
-          }
-          EOF
-          
-          echo "summary_file=${SUMMARY_FILE}" >> $GITHUB_ENV
-          echo "Scan summary generated for batch ${BATCH_NUM}"
+      # Post-scan steps commented out for faster execution
+      # Uncomment these if you need results saved to repository
+      
+      # - name: Generate scan summary
+      #   run: |
+      #     BATCH_NUM=${{ matrix.batch }}
+      #     TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+      #     SUMMARY_FILE="scan_summary_batch_${BATCH_NUM}_${TIMESTAMP}.json"
+      #     
+      #     # Count results by severity
+      #     if [ -f "${{ env.results_json }}" ]; then
+      #       CRITICAL=$(jq -r 'select(.info.severity == "critical") | .info.severity' ${{ env.results_json }} 2>/dev/null | wc -l || echo "0")
+      #       HIGH=$(jq -r 'select(.info.severity == "high") | .info.severity' ${{ env.results_json }} 2>/dev/null | wc -l || echo "0")
+      #       MEDIUM=$(jq -r 'select(.info.severity == "medium") | .info.severity' ${{ env.results_json }} 2>/dev/null | wc -l || echo "0")
+      #       LOW=$(jq -r 'select(.info.severity == "low") | .info.severity' ${{ env.results_json }} 2>/dev/null | wc -l || echo "0")
+      #       INFO=$(jq -r 'select(.info.severity == "info") | .info.severity' ${{ env.results_json }} 2>/dev/null | wc -l || echo "0")
+      #       TOTAL=$(wc -l < ${{ env.results_json }} 2>/dev/null || echo "0")
+      #     else
+      #       CRITICAL=0; HIGH=0; MEDIUM=0; LOW=0; INFO=0; TOTAL=0
+      #     fi
+      #     
+      #     # Create summary JSON
+      #     cat > "${SUMMARY_FILE}" << EOF
+      #     {
+      #       "batch_number": ${BATCH_NUM},
+      #       "scan_timestamp": "${TIMESTAMP}",
+      #       "subdomains_scanned": ${{ steps.prepare-batch.outputs.subdomain_count }},
+      #       "scan_profile": "${{ github.event.inputs.scan_profile || 'full' }}",
+      #       "results_summary": {
+      #         "total_findings": ${TOTAL},
+      #         "critical": ${CRITICAL},
+      #         "high": ${HIGH},
+      #         "medium": ${MEDIUM},
+      #         "low": ${LOW},
+      #         "info": ${INFO}
+      #       },
+      #       "scan_metadata": {
+      #         "nuclei_version": "${{ env.NUCLEI_VERSION }}",
+      #         "workflow_run_id": "${{ github.run_id }}",
+      #         "workflow_run_number": "${{ github.run_number }}"
+      #       }
+      #     }
+      #     EOF
+      #     
+      #     echo "summary_file=${SUMMARY_FILE}" >> $GITHUB_ENV
+      #     echo "Scan summary generated for batch ${BATCH_NUM}"
 
-      - name: Setup GPG for encryption
-        run: |
-          # Import GPG keys (same method as decryption)
-          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
-          echo "${{ secrets.GPG_PUBLIC_KEY }}" | gpg --batch --import
-          
-          # Verify GPG setup
-          gpg --list-secret-keys --keyid-format LONG
-          echo "✅ GPG keys imported successfully"
+      # - name: Setup GPG for encryption
+      #   run: |
+      #     # Import GPG keys (same method as decryption)
+      #     echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+      #     echo "${{ secrets.GPG_PUBLIC_KEY }}" | gpg --batch --import
+      #     
+      #     # Verify GPG setup
+      #     gpg --list-secret-keys --keyid-format LONG
+      #     echo "✅ GPG keys imported successfully"
 
-      - name: Encrypt scan results
-        run: |
-          BATCH_NUM=${{ matrix.batch }}
-          
-          # Encrypt JSON results file
-          if [ -f "${{ env.results_json }}" ]; then
-            gpg --batch --yes --trust-model always \
-                --recipient "${{ secrets.GPG_KEY_ID }}" \
-                --encrypt --armor \
-                --output "${{ env.results_json }}.gpg" \
-                "${{ env.results_json }}"
-            echo "JSON results encrypted: ${{ env.results_json }}.gpg"
-          fi
-          
-          # Encrypt text results file
-          if [ -f "${{ env.results_txt }}" ]; then
-            gpg --batch --yes --trust-model always \
-                --recipient "${{ secrets.GPG_KEY_ID }}" \
-                --encrypt --armor \
-                --output "${{ env.results_txt }}.gpg" \
-                "${{ env.results_txt }}"
-            echo "Text results encrypted: ${{ env.results_txt }}.gpg"
-          fi
-          
-          # Encrypt summary file
-          if [ -f "${{ env.summary_file }}" ]; then
-            gpg --batch --yes --trust-model always \
-                --recipient "${{ secrets.GPG_KEY_ID }}" \
-                --encrypt --armor \
-                --output "${{ env.summary_file }}.gpg" \
-                "${{ env.summary_file }}"
-            echo "Summary encrypted: ${{ env.summary_file }}.gpg"
-          fi
-          
-          # Clean up unencrypted files
-          rm -f "${{ env.results_json }}" "${{ env.results_txt }}" "${{ env.summary_file }}"
+      # - name: Encrypt scan results
+      #   run: |
+      #     BATCH_NUM=${{ matrix.batch }}
+      #     
+      #     # Encrypt JSON results file
+      #     if [ -f "${{ env.results_json }}" ]; then
+      #       gpg --batch --yes --trust-model always \
+      #           --recipient "${{ secrets.GPG_KEY_ID }}" \
+      #           --encrypt --armor \
+      #           --output "${{ env.results_json }}.gpg" \
+      #           "${{ env.results_json }}"
+      #       echo "JSON results encrypted: ${{ env.results_json }}.gpg"
+      #     fi
+      #     
+      #     # Encrypt text results file
+      #     if [ -f "${{ env.results_txt }}" ]; then
+      #       gpg --batch --yes --trust-model always \
+      #           --recipient "${{ secrets.GPG_KEY_ID }}" \
+      #           --encrypt --armor \
+      #           --output "${{ env.results_txt }}.gpg" \
+      #           "${{ env.results_txt }}"
+      #       echo "Text results encrypted: ${{ env.results_txt }}.gpg"
+      #     fi
+      #     
+      #     # Encrypt summary file
+      #     if [ -f "${{ env.summary_file }}" ]; then
+      #       gpg --batch --yes --trust-model always \
+      #           --recipient "${{ secrets.GPG_KEY_ID }}" \
+      #           --encrypt --armor \
+      #           --output "${{ env.summary_file }}.gpg" \
+      #           "${{ env.summary_file }}"
+      #       echo "Summary encrypted: ${{ env.summary_file }}.gpg"
+      #     fi
+      #     
+      #     # Clean up unencrypted files
+      #     rm -f "${{ env.results_json }}" "${{ env.results_txt }}" "${{ env.summary_file }}"
 
-      - name: Setup results branch
-        run: |
-          # Configure git
-          git config --global user.name "Nuclei Scanner Bot"
-          git config --global user.email "nuclei-scanner@github-actions.bot"
-          
-          # Set up authentication
-          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
-          
-          # Create results branch if it doesn't exist
-          git fetch origin ${{ env.RESULTS_BRANCH }} || git checkout -b ${{ env.RESULTS_BRANCH }}
-          git checkout ${{ env.RESULTS_BRANCH }} || git checkout -b ${{ env.RESULTS_BRANCH }}
-          
-          # Create output directory structure
-          mkdir -p output/$(date +%Y/%m/%d)
-          mkdir -p output/latest
+      # - name: Setup results branch
+      #   run: |
+      #     # Configure git
+      #     git config --global user.name "Nuclei Scanner Bot"
+      #     git config --global user.email "nuclei-scanner@github-actions.bot"
+      #     
+      #     # Set up authentication
+      #     git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+      #     
+      #     # Create results branch if it doesn't exist
+      #     git fetch origin ${{ env.RESULTS_BRANCH }} || git checkout -b ${{ env.RESULTS_BRANCH }}
+      #     git checkout ${{ env.RESULTS_BRANCH }} || git checkout -b ${{ env.RESULTS_BRANCH }}
+      #     
+      #     # Create output directory structure
+      #     mkdir -p output/$(date +%Y/%m/%d)
+      #     mkdir -p output/latest
 
-      - name: Store encrypted results in repo
-        run: |
-          BATCH_NUM=${{ matrix.batch }}
-          DATE_DIR="output/$(date +%Y/%m/%d)"
-          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-          
-          # Move encrypted files to organized directory structure
-          for file in nuclei_results_batch_${BATCH_NUM}_*.json.gpg; do
-            if [ -f "$file" ]; then
-              mv "$file" "${DATE_DIR}/nuclei_results_batch_${BATCH_NUM}_${TIMESTAMP}.json.gpg"
-              echo "Moved JSON results file: $file"
-            fi
-          done
-          
-          for file in nuclei_results_batch_${BATCH_NUM}_*.txt.gpg; do
-            if [ -f "$file" ]; then
-              mv "$file" "${DATE_DIR}/nuclei_results_batch_${BATCH_NUM}_${TIMESTAMP}.txt.gpg"
-              echo "Moved text results file: $file"
-            fi
-          done
-          
-          for file in scan_summary_batch_${BATCH_NUM}_*.json.gpg; do
-            if [ -f "$file" ]; then
-              mv "$file" "${DATE_DIR}/scan_summary_batch_${BATCH_NUM}_${TIMESTAMP}.json.gpg"
-              echo "Moved summary file: $file"
-            fi
-          done
-          
-          # Also copy to latest directory for easy access
-          if [ -f "${DATE_DIR}/nuclei_results_batch_${BATCH_NUM}_${TIMESTAMP}.json.gpg" ]; then
-            cp "${DATE_DIR}/nuclei_results_batch_${BATCH_NUM}_${TIMESTAMP}.json.gpg" "output/latest/nuclei_results_batch_${BATCH_NUM}_latest.json.gpg"
-          fi
-          
-          if [ -f "${DATE_DIR}/nuclei_results_batch_${BATCH_NUM}_${TIMESTAMP}.txt.gpg" ]; then
-            cp "${DATE_DIR}/nuclei_results_batch_${BATCH_NUM}_${TIMESTAMP}.txt.gpg" "output/latest/nuclei_results_batch_${BATCH_NUM}_latest.txt.gpg"
-          fi
-          
-          if [ -f "${DATE_DIR}/scan_summary_batch_${BATCH_NUM}_${TIMESTAMP}.json.gpg" ]; then
-            cp "${DATE_DIR}/scan_summary_batch_${BATCH_NUM}_${TIMESTAMP}.json.gpg" "output/latest/scan_summary_batch_${BATCH_NUM}_latest.json.gpg"
-          fi
+      # - name: Store encrypted results in repo
+      #   run: |
+      #     BATCH_NUM=${{ matrix.batch }}
+      #     DATE_DIR="output/$(date +%Y/%m/%d)"
+      #     TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+      #     
+      #     # Move encrypted files to organized directory structure
+      #     for file in nuclei_results_batch_${BATCH_NUM}_*.json.gpg; do
+      #       if [ -f "$file" ]; then
+      #         mv "$file" "${DATE_DIR}/nuclei_results_batch_${BATCH_NUM}_${TIMESTAMP}.json.gpg"
+      #         echo "Moved JSON results file: $file"
+      #       fi
+      #     done
+      #     
+      #     for file in nuclei_results_batch_${BATCH_NUM}_*.txt.gpg; do
+      #       if [ -f "$file" ]; then
+      #         mv "$file" "${DATE_DIR}/nuclei_results_batch_${BATCH_NUM}_${TIMESTAMP}.txt.gpg"
+      #         echo "Moved text results file: $file"
+      #       fi
+      #     done
+      #     
+      #     for file in scan_summary_batch_${BATCH_NUM}_*.json.gpg; do
+      #       if [ -f "$file" ]; then
+      #         mv "$file" "${DATE_DIR}/scan_summary_batch_${BATCH_NUM}_${TIMESTAMP}.json.gpg"
+      #         echo "Moved summary file: $file"
+      #       fi
+      #     done
+      #     
+      #     # Also copy to latest directory for easy access
+      #     if [ -f "${DATE_DIR}/nuclei_results_batch_${BATCH_NUM}_${TIMESTAMP}.json.gpg" ]; then
+      #       cp "${DATE_DIR}/nuclei_results_batch_${BATCH_NUM}_${TIMESTAMP}.json.gpg" "output/latest/nuclei_results_batch_${BATCH_NUM}_latest.json.gpg"
+      #     fi
+      #     
+      #     if [ -f "${DATE_DIR}/nuclei_results_batch_${BATCH_NUM}_${TIMESTAMP}.txt.gpg" ]; then
+      #       cp "${DATE_DIR}/nuclei_results_batch_${BATCH_NUM}_${TIMESTAMP}.txt.gpg" "output/latest/nuclei_results_batch_${BATCH_NUM}_latest.txt.gpg"
+      #     fi
+      #     
+      #     if [ -f "${DATE_DIR}/scan_summary_batch_${BATCH_NUM}_${TIMESTAMP}.json.gpg" ]; then
+      #       cp "${DATE_DIR}/scan_summary_batch_${BATCH_NUM}_${TIMESTAMP}.json.gpg" "output/latest/scan_summary_batch_${BATCH_NUM}_latest.json.gpg"
+      #     fi
 
-      - name: Commit and push results
-        run: |
-          BATCH_NUM=${{ matrix.batch }}
-          
-          # Add files to git
-          git add output/
-          
-          # Check if there are changes to commit
-          if git diff --staged --quiet; then
-            echo "No new results to commit for batch ${{ matrix.batch }}"
-          else
-            # Commit with detailed message
-            FINDINGS_COUNT="0"
-            if [ -f "output/latest/scan_summary_batch_${BATCH_NUM}_latest.json.gpg" ]; then
-              # Try to get findings count from encrypted summary (will show 0 if can't decrypt)
-              TEMP_SUMMARY=$(mktemp)
-              if gpg --batch --yes --quiet --trust-model always --decrypt "output/latest/scan_summary_batch_${BATCH_NUM}_latest.json.gpg" > "$TEMP_SUMMARY" 2>/dev/null; then
-                FINDINGS_COUNT=$(jq -r '.results_summary.total_findings // 0' "$TEMP_SUMMARY" 2>/dev/null || echo "0")
-              fi
-              rm -f "$TEMP_SUMMARY"
-            fi
-            
-            git commit -m "🎯 Batch ${{ matrix.batch }} scan results - ${FINDINGS_COUNT} findings
-            
-            - Batch: ${{ matrix.batch }}
-            - Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
-            - Workflow: ${{ github.workflow }}
-            - Run ID: ${{ github.run_id }}
-            - Scan Profile: ${{ github.event.inputs.scan_profile || 'full' }}
-            - Findings: ${FINDINGS_COUNT}"
-            
-            # Push with retry logic
-            for i in {1..3}; do
-              if git push origin ${{ env.RESULTS_BRANCH }}; then
-                echo "Successfully pushed batch ${{ matrix.batch }} results (attempt $i)"
-                break
-              else
-                echo "Push failed for batch ${{ matrix.batch }}, attempt $i/3"
-                if [ $i -eq 3 ]; then
-                  echo "Failed to push after 3 attempts"
-                  exit 1
-                fi
-                sleep $((i * 10))  # Exponential backoff
-                git pull --rebase origin ${{ env.RESULTS_BRANCH }} || true
-              fi
-            done
-          fi
+      # - name: Commit and push results
+      #   run: |
+      #     BATCH_NUM=${{ matrix.batch }}
+      #     
+      #     # Add files to git
+      #     git add output/
+      #     
+      #     # Check if there are changes to commit
+      #     if git diff --staged --quiet; then
+      #       echo "No new results to commit for batch ${{ matrix.batch }}"
+      #     else
+      #       # Commit with detailed message
+      #       FINDINGS_COUNT="0"
+      #       if [ -f "output/latest/scan_summary_batch_${BATCH_NUM}_latest.json.gpg" ]; then
+      #         # Try to get findings count from encrypted summary (will show 0 if can't decrypt)
+      #         TEMP_SUMMARY=$(mktemp)
+      #         if gpg --batch --yes --quiet --trust-model always --decrypt "output/latest/scan_summary_batch_${BATCH_NUM}_latest.json.gpg" > "$TEMP_SUMMARY" 2>/dev/null; then
+      #           FINDINGS_COUNT=$(jq -r '.results_summary.total_findings // 0' "$TEMP_SUMMARY" 2>/dev/null || echo "0")
+      #         fi
+      #         rm -f "$TEMP_SUMMARY"
+      #       fi
+      #       
+      #       git commit -m "🎯 Batch ${{ matrix.batch }} scan results - ${FINDINGS_COUNT} findings
+      #       
+      #       - Batch: ${{ matrix.batch }}
+      #       - Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+      #       - Workflow: ${{ github.workflow }}
+      #       - Run ID: ${{ github.run_id }}
+      #       - Scan Profile: ${{ github.event.inputs.scan_profile || 'full' }}
+      #       - Findings: ${FINDINGS_COUNT}"
+      #       
+      #       # Push with retry logic
+      #       for i in {1..3}; do
+      #         if git push origin ${{ env.RESULTS_BRANCH }}; then
+      #           echo "Successfully pushed batch ${{ matrix.batch }} results (attempt $i)"
+      #           break
+      #         else
+      #           echo "Push failed for batch ${{ matrix.batch }}, attempt $i/3"
+      #           if [ $i -eq 3 ]; then
+      #             echo "Failed to push after 3 attempts"
+      #             exit 1
+      #           fi
+      #           sleep $((i * 10))  # Exponential backoff
+      #           git pull --rebase origin ${{ env.RESULTS_BRANCH }} || true
+      #         fi
+      #       done
+      #     fi
 
-      - name: Cleanup batch files
-        run: |
-          rm -f batch_${{ matrix.batch }}.txt
-          rm -f subdomains/all-subdomains.txt  # Remove decrypted subdomain file
-          rm -f *.json
-          echo "Cleanup completed for batch ${{ matrix.batch }}"
+      # - name: Cleanup batch files
+      #   run: |
+      #     rm -f batch_${{ matrix.batch }}.txt
+      #     rm -f subdomains/all-subdomains.txt  # Remove decrypted subdomain file
+      #     rm -f *.json
+      #     echo "Cleanup completed for batch ${{ matrix.batch }}"
 
   # # Job to consolidate all batch results into single files
   # consolidate-all-results:
