@@ -28,9 +28,6 @@ on:
         - full
         - critical
         - custom
-  schedule:
-    # Run daily at 2 AM UTC
-    - cron: '0 2 * * *'
 
 env:
   BATCH_SIZE: ${{ github.event.inputs.batch_size || '500' }}  # Use input or default to 500
